@@ -1,0 +1,6 @@
+aiogram==3.4.1
+openai==0.28
+requests
+certifi
+fastapi
+uvicorn
