@@ -1,0 +1,18 @@
+[
+  {
+    "name": "МГУ имени М.В. Ломоносова",
+    "city": "Москва",
+    "region": "Москва",
+    "type": "университет",
+    "site": "https://www.msu.ru/",
+    "url": "https://www.edu.ru/abitur/act.25/"
+  },
+  {
+    "name": "Санкт-Петербургский государственный университет",
+    "city": "Санкт-Петербург",
+    "region": "Санкт-Петербург",
+    "type": "университет",
+    "site": "https://spbu.ru/",
+    "url": "https://www.edu.ru/abitur/act.26/"
+  }
+]
