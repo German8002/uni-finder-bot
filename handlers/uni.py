@@ -24,7 +24,7 @@ def _load_data():
     if now - _cache["ts"] < CACHE_TTL and _cache["data"]:
         return _cache["data"]
     try:
-        data = json.loads(Path(DATA_PATH).read_text(encoding="utf-8"))
+        data = json.loads(DATA_PATH.read_text(encoding="utf-8"))
     except Exception:
         data = []
     _cache["ts"] = now

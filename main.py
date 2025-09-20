@@ -6,6 +6,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.types import Update
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,7 +23,7 @@ BASE_URL = PUBLIC_URL or RENDER_EXTERNAL_URL
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("uni-finder")
 
-bot = Bot(token=TELEGRAM_TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(token=TELEGRAM_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=MemoryStorage())
 
 from handlers.search import router as search_router
@@ -41,8 +42,7 @@ async def on_startup():
     if not BASE_URL:
         log.warning("No PUBLIC_URL/RENDER_EXTERNAL_URL set; webhook will not be configured.")
         return
-    webhook_path = f"/webhook/{WEBHOOK_SECRET}"
-    url = BASE_URL.rstrip("/") + webhook_path
+    url = BASE_URL.rstrip("/") + f"/webhook/{WEBHOOK_SECRET}"
     await bot.set_webhook(url, drop_pending_updates=True)
     log.info("Webhook set to %s", url)
 
@@ -55,18 +55,10 @@ async def telegram_webhook(request: Request, secret: str):
     if secret != WEBHOOK_SECRET:
         return Response(status_code=403)
     data = await request.body()
-    try:
-        update = Update.model_validate_json(data.decode("utf-8"))
-    except Exception as e:
-        log.error("Bad update JSON: %s", e, exc_info=True)
-        return Response(status_code=400)
-    try:
-        await dp.feed_update(bot, update)
-    except Exception as e:
-        log.error("Error handling update: %s", e, exc_info=True)
-        return Response(status_code=500)
+    update = Update.model_validate_json(data.decode("utf-8"))
+    await dp.feed_update(bot, update)
     return Response(status_code=200)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT","10000")), reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT","10000")), reload=False)

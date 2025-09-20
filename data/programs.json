@@ -20,16 +20,5 @@
     "budget": "Да",
     "score_min": 290,
     "url": "https://www.hse.ru/"
-  },
-  {
-    "university": "СПбГУ",
-    "program": "Инженерия данных",
-    "city": "Санкт-Петербург",
-    "level": "Бакалавриат",
-    "form": "Очная",
-    "exams": "Математика, Информатика, Русский",
-    "budget": "Да",
-    "score_min": 285,
-    "url": "https://spbu.ru/"
   }
 ]

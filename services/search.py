@@ -1,10 +1,9 @@
 
-from typing import Optional
-from services.offline_data import get_all
 try:
     from rapidfuzz import fuzz
 except Exception:
     fuzz = None
+from services.offline_data import get_all
 
 def _score_row(row: dict, query: str) -> float:
     q = query.lower()
