@@ -1,0 +1,42 @@
+name: Build programs (latest)
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 2 * * 1"  # weekly, Mon 02:00 UTC
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install aiohttp beautifulsoup4 lxml
+
+      - name: Crawl (latest) and normalize
+        env:
+          SCRAPE_CONCURRENCY: "6"
+          SCRAPE_DELAY: "0.6"
+          SCRAPE_MAX_PAGES_PER_SITE: "40"
+        run: |
+          python scraper_latest/scripts/crawl_official_latest.py
+          python scraper_latest/scripts/normalize_latest.py scraper_latest/out/programs_latest_raw.csv scraper_latest/out/programs_latest_clean.csv
+
+      - name: Publish CSV to repo
+        run: |
+          mkdir -p public/data
+          cp scraper_latest/out/programs_latest_clean.csv public/data/
+
+      - name: Commit updated data
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "data: update programs_latest_clean.csv"
+          branch: ${{ github.ref_name }}
