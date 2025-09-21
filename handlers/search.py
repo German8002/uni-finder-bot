@@ -57,26 +57,31 @@ def _kb_more(q: str, page: int) -> InlineKeyboardMarkup:
     ]])
 
 def _format_items(items: list[dict]) -> str:
+    # Всегда возвращаем НЕПУСТОЙ текст
     if not items:
         return "Ничего не нашёл. Попробуй уточнить запрос (город, уровень, форма)."
     MAX_LEN = 3900
     chunks: list[str] = []
     used = 0
     for i, r in enumerate(items, 1):
-        title_text = f"{(r.get('program') or '').strip()} — {(r.get('university') or '').strip()}".strip(" —")
+        program = (r.get('program') or '').strip()
+        university = (r.get('university') or '').strip()
+        title_text = f"{program} — {university}".strip(" —")
+        if not title_text:
+            title_text = "Направление"
         url = (r.get('url') or '').strip()
         if url and url.startswith(("http://", "https://")):
             line = f"<b>{i}.</b> <a href=\"{html.escape(url, quote=True)}\">{html.escape(title_text)}</a>"
         else:
             line = f"<b>{i}.</b> {html.escape(title_text)}"
-        meta = []
-        for key in ["program","university","city","level","form"]:
-            val = (r.get(key) or "").strip()
+        meta_parts = []
+        for key in ("city","level","form"):
+            val = (r.get(key) or '').strip()
             if val:
-                meta.append(html.escape(val))
-        if meta:
-            line += "\n" + " · ".join(meta)
-        snippet = (r.get("snippet") or "").strip()
+                meta_parts.append(html.escape(val))
+        if meta_parts:
+            line += "\n" + " · ".join(meta_parts)
+        snippet = (r.get('snippet') or '').strip()
         if snippet:
             s = html.escape(snippet)
             if len(s) > 350:
@@ -87,7 +92,13 @@ def _format_items(items: list[dict]) -> str:
             break
         chunks.append(line)
         used += len(line)
-    return "".join(chunks).rstrip()
+    result = "".join(chunks).rstrip()
+    if not result:
+        first = items[0] if items else {}
+        t = html.escape((first.get('program') or 'Направление'))
+        u = html.escape((first.get('university') or 'ВУЗ'))
+        result = f"1. {t} — {u}"
+    return result
 
 @router.message(CommandStart())
 async def start(m: types.Message):
@@ -110,8 +121,11 @@ async def find(m: types.Message):
         return
     q, f = _parse_filters(payload)
     res = search(q, page=1, per_page=6, filters=f)
-    kb = _kb_more(payload, 1) if res["total"] > 6 else None
-    await m.answer(_format_items(res["items"]), reply_markup=kb)
+    text = _format_items(res.get("items") or [])
+    if not text.strip():
+        text = "Ничего не нашёл. Попробуй уточнить запрос (город, уровень, форма)."
+    kb = _kb_more(payload, 1) if res.get("total", 0) > 6 else None
+    await m.answer(text, reply_markup=kb)
 
 @router.callback_query(F.data.startswith("more|"))
 async def more(cb: CallbackQuery):
@@ -126,8 +140,11 @@ async def more(cb: CallbackQuery):
         return
     q2, f = _parse_filters(q)
     res = search(q2, page=page, per_page=6, filters=f)
+    text = _format_items(res.get("items") or [])
+    if not text.strip():
+        text = "Больше результатов нет."
     kb = None
-    if page*6 < res["total"]:
+    if page*6 < res.get("total", 0):
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Ещё", callback_data=f"more|{page+1}|{q}")]])
-    await cb.message.answer(_format_items(res["items"]), reply_markup=kb)
+    await cb.message.answer(text, reply_markup=kb)
     await cb.answer()
