@@ -28,12 +28,12 @@ jobs:
           SCRAPE_MAX_PAGES_PER_SITE: "40"
         run: |
           python scraper_latest/scripts/crawl_official_latest.py
-          python scraper_latest/scripts/normalize_latest.py scraper_latest/out/programs_latest_raw.csv scraper_latest/out/programs_latest_clean.csv
+          python scraper_latest/scripts/normalize_latest.py out/programs_latest_raw.csv out/programs_latest_clean.csv
 
       - name: Publish CSV to repo
         run: |
           mkdir -p public/data
-          cp scraper_latest/out/programs_latest_clean.csv public/data/
+          cp out/programs_latest_clean.csv public/data/
 
       - name: Commit updated data
         uses: stefanzweifel/git-auto-commit-action@v5
