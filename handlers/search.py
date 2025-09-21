@@ -24,7 +24,7 @@ def _rate_ok(user_id: int) -> bool:
 
 def _parse_filters(q: str) -> tuple[str, dict]:
     q0 = q.strip()
-    filters = {}
+    filters: dict = {}
     for lvl in LEVELS:
         if re.search(rf"\b{lvl}\b", q0, flags=re.IGNORECASE):
             filters["level"] = lvl
@@ -57,27 +57,18 @@ def _kb_more(q: str, page: int) -> InlineKeyboardMarkup:
     ]])
 
 def _format_items(items: list[dict]) -> str:
-    """Безопасный вывод с HTML-экранированием и ограничением длины.
-    Не режем внутри тегов, чтобы не было 'can't parse entities'.
-    """
     if not items:
         return "Ничего не нашёл. Попробуй уточнить запрос (город, уровень, форма)."
-
-    MAX_LEN = 3900  # запас до лимита 4096
+    MAX_LEN = 3900
     chunks: list[str] = []
     used = 0
-
     for i, r in enumerate(items, 1):
         title_text = f"{(r.get('program') or '').strip()} — {(r.get('university') or '').strip()}".strip(" —")
         url = (r.get('url') or '').strip()
-
-        # Заголовок
         if url and url.startswith(("http://", "https://")):
             line = f"<b>{i}.</b> <a href=\"{html.escape(url, quote=True)}\">{html.escape(title_text)}</a>"
         else:
             line = f"<b>{i}.</b> {html.escape(title_text)}"
-
-        # Метаданные
         meta = []
         for key in ["program","university","city","level","form"]:
             val = (r.get(key) or "").strip()
@@ -85,23 +76,17 @@ def _format_items(items: list[dict]) -> str:
                 meta.append(html.escape(val))
         if meta:
             line += "\n" + " · ".join(meta)
-
-        # Сниппет
         snippet = (r.get("snippet") or "").strip()
         if snippet:
             s = html.escape(snippet)
             if len(s) > 350:
                 s = s[:350] + "…"
             line += f"\n{s}"
-
         line += "\n\n"
-
-        # Ограничение по длине
         if used + len(line) > MAX_LEN:
             break
         chunks.append(line)
         used += len(line)
-
     return "".join(chunks).rstrip()
 
 @router.message(CommandStart())
