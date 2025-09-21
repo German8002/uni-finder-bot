@@ -1,0 +1,60 @@
+name: Crawl max & build universities
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * 0"   # weekly, Sun 03:30 UTC
+
+jobs:
+  crawl-max:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (root)
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Install deps (scraper_max)
+        run: |
+          if [ -f scraper_max/requirements.txt ]; then pip install -r scraper_max/requirements.txt; fi
+
+      - name: Build universities (Wikipedia) with heartbeat
+        run: |
+          set -euo pipefail
+          mkdir -p scraper_max/out
+          (
+            trap 'kill 0' SIGINT SIGTERM EXIT
+            while true; do echo "[heartbeat] build_universities.py still running $(date -u +"%Y-%m-%dT%H:%M:%SZ")"; sleep 60; done &
+            python scraper_max/scripts/build_universities.py
+          )
+
+      - name: Show outputs
+        run: |
+          echo "Listing scraper_max/out:"
+          ls -la scraper_max/out || true
+          if compgen -G "scraper_max/out/*.json" > /dev/null; then head -n 20 scraper_max/out/*.json || true; fi
+
+      - name: Commit updated catalog
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A scraper_max/out || true
+          [ -f universities.json ] && git add universities.json || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: refresh universities catalog ($(date -u +'%Y-%m-%dT%H:%M:%SZ'))"
+            git push
+          fi
