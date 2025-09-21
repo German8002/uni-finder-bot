@@ -1,222 +1,146 @@
+# -*- coding: utf-8 -*-
+"""
+Search handlers for the Telegram bot (aiogram v3+).
 
-from aiogram import Router, F
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from services.offline_data import OfflineData
-import html as _html
+Provides /find command with robust parsing and safe output
+(no HTML entities, chunks for long messages).
+"""
+from __future__ import annotations
+
 import re
+from typing import Dict, Optional, Tuple
 
-router = Router()
-data = OfflineData()
+from aiogram import Router, types
+from aiogram.filters import Command, CommandObject
 
-# ---------- Utils ----------
+from services.offline_data import OfflineData
 
-def _escape(s: str) -> str:
-    return _html.escape(str(s or ""))
+router = Router(name="search")
 
-def _norm_city(s: str) -> str:
+# single instance (lightweight)
+DATA = OfflineData()
+
+MAX_MSG = 3900  # Telegram hard limit ~4096
+
+LEVELS = {
+    "бакалавриат", "магистратура", "специалитет", "аспирантура",
+}
+FORMS = {
+    "очная", "заочная", "очно-заочная", "очно-заоч", "вечерняя", "дистанционная", "дистанционно",
+}
+
+def _clean(s: Optional[str]) -> str:
     if not s:
         return ""
-    s = s.lower().strip()
-    # remove common prefixes
-    s = re.sub(r"^(г\.|гор\.|город)\s*", "", s)
-    s = s.replace("ё", "е")
-    # normalize dashes and spaces
-    s = re.sub(r"[-–—]+", "-", s)
-    s = re.sub(r"\s+", " ", s)
-    return s
+    # Remove accidental html that breaks parse_mode=HTML
+    return str(s).replace("<", "«").replace(">", "»")
 
-def _city_matches(item_city: str, user_city: str) -> bool:
-    if not user_city:
-        return True
-    ic = _norm_city(item_city)
-    uc = _norm_city(user_city)
-    if not ic or not uc:
-        return False
-    # exact match only (no fuzzy to avoid wrong cities)
-    return ic == uc
-
-def _truncate(s: str, limit: int) -> str:
-    s = s or ""
-    if len(s) <= limit:
-        return s
-    return s[:max(0, limit - 1)].rstrip() + "…"
-
-def _format_item(i: dict, idx: int) -> str:
-    title = i.get("program") or i.get("title") or "Учебная программа"
-    uni = i.get("university") or i.get("uni") or i.get("institute") or ""
-    city = i.get("city") or ""
-    level = i.get("level") or ""
-    form = i.get("form") or ""
-    exams = i.get("exams") or i.get("entrance") or i.get("subjects") or ""
-    min_score = i.get("min_score") or i.get("minscore") or i.get("min") or ""
-    budget = i.get("budget")
-    url = i.get("url") or i.get("link") or ""
-
-    lines = []
-    header = f"{idx}. {_escape(title)}"
-    if uni:
-        header += f" — {_escape(uni)}"
-    lines.append(header)
-
-    attrs = []
-    if city:
-        attrs.append(f"Город: {_escape(city)}")
-    if level:
-        attrs.append(f"Уровень: {_escape(level)}")
-    if form:
-        attrs.append(f"Форма: {_escape(form)}")
-    if attrs:
-        lines.append(". ".join(attrs) + ".")
-
-    extras = []
-    if exams:
-        extras.append(f"Экзамены: {_escape(exams)}")
-    if budget is not None:
-        extras.append(f"Бюджет: {'Да' if bool(budget) else 'Нет'}")
-    if min_score:
-        extras.append(f"Мин. балл: {_escape(min_score)}")
-
-    if extras:
-        lines.append(". ".join(extras) + ".")
-
-    if url:
-        # Без HTML-ссылок — пусть Telegram сам превратит в кликабельный URL
-        lines.append(str(url))
-
-    # Не даём разрастаться одной карточке
-    text = "\n".join(lines)
-    return _truncate(text, 800)
-
-def _chunk_text(text: str, limit: int = 3800):
-    """Разбиваем длинный текст на куски по границе строки."""
-    if len(text) <= limit:
-        return [text]
+def _split_send_text(text: str, message: types.Message):
+    # Yield chunks and send
     chunks = []
-    current = []
-    size = 0
+    cur = []
+    cur_len = 0
     for line in text.splitlines():
-        add = len(line) + 1  # +\n
-        if size + add > limit and current:
-            chunks.append("\n".join(current))
-            current = [line]
-            size = add
+        if cur_len + len(line) + 1 > MAX_MSG:
+            chunks.append("\n".join(cur))
+            cur = [line]
+            cur_len = len(line) + 1
         else:
-            current.append(line)
-            size += add
-    if current:
-        chunks.append("\n".join(current))
+            cur.append(line)
+            cur_len += len(line) + 1
+    if cur:
+        chunks.append("\n".join(cur))
     return chunks
 
-def _parse_query(text: str) -> dict:
-    # Примеры:
-    # /find информатика город Омск бакалавриат очная бюджет
-    # /find математика city=Санкт-Петербург магистратура
-    t = re.sub(r"^/find\s*", "", text, flags=re.I).strip()
+def _parse_find_args(args: Optional[str]) -> Dict[str, str]:
+    """
+    Very forgiving parser:
+      - city can be given as city=..., город=..., or after word "город"
+      - level/form recognized by keywords
+      - rest goes to free-text query
+    """
+    city = ""
+    level = ""
+    form = ""
+    query_parts = []
 
-    # Явные ключ=значение
-    params = {}
-    for m in re.finditer(r"(city|город|level|уровень|form|форма)=([^\s]+(?:\s+[^\s=]+)*)", t, flags=re.I):
-        key = m.group(1).lower()
-        val = m.group(2).strip()
-        params[key] = val
-        t = t.replace(m.group(0), "").strip()
+    if not args:
+        return {"query": "", "city": "", "level": "", "form": ""}
 
-    # Свободная форма
-    city = params.get("city") or params.get("город")
-    level = params.get("level") or params.get("уровень")
-    form = params.get("form") or params.get("форма")
+    tokens = args.split()
+    skip_next = False
+    for i, tok in enumerate(tokens):
+        if skip_next:
+            skip_next = False
+            continue
+        low = tok.lower()
 
-    # Евристики
-    if not city:
-        m = re.search(r"(город|г\.)\s*([A-Za-zА-Яа-яёЁ\-\.\s]+)", t)
-        if m:
-            city = m.group(2).strip()
-            t = t.replace(m.group(0), "").strip()
-    if not level:
-        m = re.search(r"\b(бакалавриат|магистратура|специалитет|аспирантура)\b", t, flags=re.I)
-        if m:
-            level = m.group(1)
-            t = t.replace(m.group(1), "").strip()
-    if not form:
-        m = re.search(r"\b(очная|очно-заочная|заочная)\b", t, flags=re.I)
-        if m:
-            form = m.group(1)
-            t = t.replace(m.group(1), "").strip()
+        # city=..., город=...
+        if low.startswith("city=") or low.startswith("город="):
+            city = tok.split("=", 1)[1]
+            continue
+        if low in {"город", "city"} and i + 1 < len(tokens):
+            city = tokens[i + 1]
+            skip_next = True
+            continue
 
-    subject = t.strip()
+        # level / form
+        if low in LEVELS:
+            level = low
+            continue
+        if low in FORMS:
+            form = low
+            continue
 
-    return {
-        "subject": subject,
-        "city": city,
-        "level": level,
-        "form": form,
-    }
+        query_parts.append(tok)
 
-def _build_kb(next_offset: int | None):
-    if next_offset is None:
-        return None
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Ещё", callback_data=f"more:{next_offset}")
-    ]])
+    query = " ".join(query_parts).strip()
+    return {"query": query, "city": city, "level": level, "form": form}
 
-# ---------- Handlers ----------
+def _format_item(idx: int, it: Dict[str, str]) -> str:
+    # Plain text to avoid HTML parse issues
+    lines = [
+        f"{idx}. {it.get('program','')} — {it.get('university','')}",
+        f"Город: {it.get('city','')}  |  Уровень: {it.get('level','')}  |  Форма: {it.get('form','')}",
+    ]
+    exams = it.get("exams")
+    if exams:
+        lines.append(f"Экзамены: {exams}")
+    budget = it.get("budget")
+    if str(budget).strip():
+        lines.append(f"Бюджет: {budget}")
+    min_score = it.get("min_score")
+    if str(min_score).strip():
+        lines.append(f"Мин. балл: {min_score}")
+    url = it.get("url")
+    if url:
+        lines.append(f"{url}")
+    return "\n".join(_clean(x) for x in lines)
 
-@router.message(F.text.regexp(r"^/find\b", flags=re.I))
-async def find(m: Message):
-    q = _parse_query(m.text or "")
-    subject = q["subject"]
-    city = q["city"]
-    level = q["level"]
-    form = q["form"]
+@router.message(Command("find"))
+async def find(m: types.Message, command: CommandObject):
+    args = command.args or ""
+    params = _parse_find_args(args)
 
-    # Параметры поиска
-    offset = 0
-    limit = 10
-
-    res = data.search_programs(
-        subject=subject,
-        city=None,   # фильтруем строже сами ниже
-        level=level,
-        form=form,
-        offset=offset,
-        limit=limit * 2,  # возьмём с запасом, потом отфильтруем по городу
+    items = DATA.find_programs(
+        query=params["query"],
+        city=params["city"],
+        level=params["level"],
+        form=params["form"],
+        limit=10,
     )
 
-    items = res.get("items", [])
-    # Строгая фильтрация по городу
-    if city:
-        items = [i for i in items if _city_matches(i.get("city"), city)]
-
-    # Обрезаем до лимита
-    items = items[:limit]
-
     if not items:
-        msg = "Ничего не нашёл. Попробуй уточнить запрос (город, уровень, форма)."
-        if city:
-            msg = f"В городе {_escape(city)} ничего не нашёл по запросу «{_escape(subject or '').strip() or 'любой профиль'}»."
-        await m.answer(msg)
+        await m.answer("Ничего не нашёл. Попробуй уточнить запрос (город, уровень, форма).")
         return
 
-    parts = [_format_item(i, idx+1) for idx, i in enumerate(items)]
-    text = "\n\n".join(parts)
+    # Build message(s)
+    blocks = []
+    for i, it in enumerate(items, 1):
+        blocks.append(_format_item(i, it))
+    text = "\n\n".join(blocks)
 
-    for chunk in _chunk_text(text):
-        await m.answer(chunk)
-
-    # Пагинация
-    next_offset = res.get("next_offset")
-    kb = _build_kb(next_offset) if res.get("has_more") else None
-    if kb:
-        await m.answer("Показать ещё?", reply_markup=kb)
-
-@router.callback_query(F.data.startswith("more:"))
-async def more(cb: CallbackQuery):
-    try:
-        next_offset = int(cb.data.split(":", 1)[1])
-    except Exception:
-        await cb.answer()
-        return
-
-    # Не знаем прошлого текста — просто попросим повторить запрос
-    await cb.message.answer("Повтори запрос командой /find с нужными фильтрами (город, профиль, уровень).")
-    await cb.answer()
+    chunks = _split_send_text(text, m)
+    for part in chunks:
+        if part.strip():
+            await m.answer(part)
