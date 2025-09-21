@@ -41,6 +41,9 @@ def _parse_filters(q: str) -> tuple[str, dict]:
     m3 = re.search(r"(?:егэ|экзамен[ы]?)[:=]\s*([а-яё,\s]+)", q0, re.IGNORECASE)
     if m3:
         filters["exams"] = [e.strip().lower() for e in m3.group(1).split(",") if e.strip()]
+    my = re.search(r"(?:год|year)\s*[:=]\s*(\d{4})", q0, re.IGNORECASE)
+    if my:
+        filters["year"] = int(my.group(1))
     return q0, filters
 
 def _kb_more(q: str, page: int) -> InlineKeyboardMarkup:

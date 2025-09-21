@@ -35,6 +35,12 @@ def _apply_filters(rows: list[dict], filters: dict|None) -> list[dict]:
         if filters.get("exams"):
             ex_text = (r.get("exams") or "").lower()
             if not all(ex in ex_text for ex in filters["exams"]): ok=False
+        if filters.get("year"):
+            try:
+                if int(r.get("year") or 0) != int(filters["year"]):
+                    ok = False
+            except Exception:
+                ok = False
         if ok: out.append(r)
     return out
 
