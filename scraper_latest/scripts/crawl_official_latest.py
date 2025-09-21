@@ -1,6 +1,7 @@
 
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+import os
 import asyncio, re, csv, json, time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
