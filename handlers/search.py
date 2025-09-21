@@ -1,5 +1,5 @@
 
-import time, re
+import time, re, html
 from aiogram import Router, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -41,6 +41,7 @@ def _parse_filters(q: str) -> tuple[str, dict]:
     m3 = re.search(r"(?:егэ|экзамен[ы]?)[:=]\s*([а-яё,\s]+)", q0, re.IGNORECASE)
     if m3:
         filters["exams"] = [e.strip().lower() for e in m3.group(1).split(",") if e.strip()]
+    # Явный год в запросе, если хочешь принудительно
     my = re.search(r"(?:год|year)\s*[:=]\s*(\d{4})", q0, re.IGNORECASE)
     if my:
         filters["year"] = int(my.group(1))
@@ -52,22 +53,52 @@ def _kb_more(q: str, page: int) -> InlineKeyboardMarkup:
     ]])
 
 def _format_items(items: list[dict]) -> str:
+    \"\"\"Безопасный вывод с HTML-экранированием и ограничением длины.
+    Не режем внутри тегов, чтобы не было 'can't parse entities'.
+    \"\"\"
     if not items:
         return "Ничего не нашёл. Попробуй уточнить запрос (город, уровень, форма)."
-    lines = []
+
+    MAX_LEN = 3900  # запас до лимита 4096
+    chunks = []
+    used = 0
+
     for i, r in enumerate(items, 1):
-        line = f"<b>{i}.</b>"
-        if r.get('url'):
-            line += f" <a href='{r['url']}'>{r['title']}</a>"
+        title_text = f\"{(r.get('program') or '').strip()} — {(r.get('university') or '').strip()}\".strip(\" —\")
+        url = (r.get('url') or '').strip()
+
+        # Заголовок
+        if url and url.startswith((\"http://\", \"https://\"))):
+            line = f\"<b>{i}.</b> <a href=\\\"{html.escape(url, quote=True)}\\\">{html.escape(title_text)}</a>\"
         else:
-            line += f" {r['title']}"
+            line = f\"<b>{i}.</b> {html.escape(title_text)}\"
+
+        # Метаданные
         meta = []
-        for key in ["program","university","city","level","form"]:
-            if r.get(key): meta.append(r[key])
-        if meta: line += "\n" + " · ".join(meta)
-        if r.get("snippet"): line += f"\n{r['snippet']}"
-        lines.append(line)
-    return "\n\n".join(lines)[:3800]
+        for key in [\"program\",\"university\",\"city\",\"level\",\"form\"]:
+            val = (r.get(key) or \"\").strip()
+            if val:
+                meta.append(html.escape(val))
+        if meta:
+            line += \"\n\" + \" · \".join(meta)
+
+        # Сниппет
+        snippet = (r.get(\"snippet\") or \"\").strip()
+        if snippet:
+            s = html.escape(snippet)
+            if len(s) > 350:
+                s = s[:350] + \"…\"
+            line += f\"\n{s}\"
+
+        line += \"\n\n\"
+
+        # Ограничение по длине
+        if used + len(line) > MAX_LEN:
+            break
+        chunks.append(line)
+        used += len(line)
+
+    return \"\".join(chunks).rstrip()
 
 @router.message(CommandStart())
 async def start(m: types.Message):
@@ -99,7 +130,6 @@ async def more(cb: CallbackQuery):
         await cb.answer("Не удалось показать ещё."); return
     if not _rate_ok(cb.from_user.id):
         await cb.answer("Слишком часто.", show_alert=False); return
-    from .search import _parse_filters  # type: ignore
     q2, f = _parse_filters(q)
     res = search(q2, page=page, per_page=6, filters=f)
     kb = None
