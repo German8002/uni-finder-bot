@@ -1,4 +1,3 @@
-
 import time, re, html
 from aiogram import Router, types, F
 from aiogram.filters import CommandStart, Command
@@ -28,20 +27,25 @@ def _parse_filters(q: str) -> tuple[str, dict]:
     filters = {}
     for lvl in LEVELS:
         if re.search(rf"\b{lvl}\b", q0, flags=re.IGNORECASE):
-            filters["level"] = lvl; break
+            filters["level"] = lvl
+            break
     for frm in FORMS:
         if re.search(rf"\b{frm}\b", q0, flags=re.IGNORECASE):
-            filters["form"] = frm; break
+            filters["form"] = frm
+            break
     m = re.search(r"(?:город|г\.)\s*([А-ЯЁ][а-яё\- ]+)", q0)
-    if m: filters["city"] = m.group(1).strip()
+    if m:
+        filters["city"] = m.group(1).strip()
     m2 = re.search(r"city\s*[:=]\s*([\w\- ]+)", q0, flags=re.IGNORECASE)
-    if m2: filters["city"] = m2.group(1).strip()
-    if re.search(r"\bбюджет\b", q0, re.IGNORECASE): filters["budget"] = True
-    if re.search(r"\bплатн", q0, re.IGNORECASE): filters["budget"] = False
+    if m2:
+        filters["city"] = m2.group(1).strip()
+    if re.search(r"\bбюджет\b", q0, re.IGNORECASE):
+        filters["budget"] = True
+    if re.search(r"\bплатн", q0, re.IGNORECASE):
+        filters["budget"] = False
     m3 = re.search(r"(?:егэ|экзамен[ы]?)[:=]\s*([а-яё,\s]+)", q0, re.IGNORECASE)
     if m3:
         filters["exams"] = [e.strip().lower() for e in m3.group(1).split(",") if e.strip()]
-    # Явный год в запросе, если хочешь принудительно
     my = re.search(r"(?:год|year)\s*[:=]\s*(\d{4})", q0, re.IGNORECASE)
     if my:
         filters["year"] = int(my.group(1))
@@ -53,44 +57,44 @@ def _kb_more(q: str, page: int) -> InlineKeyboardMarkup:
     ]])
 
 def _format_items(items: list[dict]) -> str:
-    \"\"\"Безопасный вывод с HTML-экранированием и ограничением длины.
+    """Безопасный вывод с HTML-экранированием и ограничением длины.
     Не режем внутри тегов, чтобы не было 'can't parse entities'.
-    \"\"\"
+    """
     if not items:
         return "Ничего не нашёл. Попробуй уточнить запрос (город, уровень, форма)."
 
     MAX_LEN = 3900  # запас до лимита 4096
-    chunks = []
+    chunks: list[str] = []
     used = 0
 
     for i, r in enumerate(items, 1):
-        title_text = f\"{(r.get('program') or '').strip()} — {(r.get('university') or '').strip()}\".strip(\" —\")
+        title_text = f"{(r.get('program') or '').strip()} — {(r.get('university') or '').strip()}".strip(" —")
         url = (r.get('url') or '').strip()
 
         # Заголовок
-        if url and url.startswith((\"http://\", \"https://\"))):
-            line = f\"<b>{i}.</b> <a href=\\\"{html.escape(url, quote=True)}\\\">{html.escape(title_text)}</a>\"
+        if url and url.startswith(("http://", "https://")):
+            line = f"<b>{i}.</b> <a href=\"{html.escape(url, quote=True)}\">{html.escape(title_text)}</a>"
         else:
-            line = f\"<b>{i}.</b> {html.escape(title_text)}\"
+            line = f"<b>{i}.</b> {html.escape(title_text)}"
 
         # Метаданные
         meta = []
-        for key in [\"program\",\"university\",\"city\",\"level\",\"form\"]:
-            val = (r.get(key) or \"\").strip()
+        for key in ["program","university","city","level","form"]:
+            val = (r.get(key) or "").strip()
             if val:
                 meta.append(html.escape(val))
         if meta:
-            line += \"\n\" + \" · \".join(meta)
+            line += "\n" + " · ".join(meta)
 
         # Сниппет
-        snippet = (r.get(\"snippet\") or \"\").strip()
+        snippet = (r.get("snippet") or "").strip()
         if snippet:
             s = html.escape(snippet)
             if len(s) > 350:
-                s = s[:350] + \"…\"
-            line += f\"\n{s}\"
+                s = s[:350] + "…"
+            line += f"\n{s}"
 
-        line += \"\n\n\"
+        line += "\n\n"
 
         # Ограничение по длине
         if used + len(line) > MAX_LEN:
@@ -98,7 +102,7 @@ def _format_items(items: list[dict]) -> str:
         chunks.append(line)
         used += len(line)
 
-    return \"\".join(chunks).rstrip()
+    return "".join(chunks).rstrip()
 
 @router.message(CommandStart())
 async def start(m: types.Message):
@@ -112,11 +116,13 @@ async def start(m: types.Message):
 @router.message(Command("find"))
 async def find(m: types.Message):
     if not _rate_ok(m.from_user.id):
-        await m.answer("Слишком много запросов. Попробуй через минуту 🙏"); return
+        await m.answer("Слишком много запросов. Попробуй через минуту 🙏")
+        return
     parts = (m.text or "").split(maxsplit=1)
     payload = parts[1] if len(parts) > 1 else ""
     if not payload:
-        await m.answer("Укажи запрос: <code>/find информатика город Москва бакалавриат</code>"); return
+        await m.answer("Укажи запрос: <code>/find информатика город Москва бакалавриат</code>")
+        return
     q, f = _parse_filters(payload)
     res = search(q, page=1, per_page=6, filters=f)
     kb = _kb_more(payload, 1) if res["total"] > 6 else None
@@ -125,11 +131,14 @@ async def find(m: types.Message):
 @router.callback_query(F.data.startswith("more|"))
 async def more(cb: CallbackQuery):
     try:
-        _, page_str, q = cb.data.split("|", 2); page = int(page_str)
+        _, page_str, q = cb.data.split("|", 2)
+        page = int(page_str)
     except Exception:
-        await cb.answer("Не удалось показать ещё."); return
+        await cb.answer("Не удалось показать ещё.")
+        return
     if not _rate_ok(cb.from_user.id):
-        await cb.answer("Слишком часто.", show_alert=False); return
+        await cb.answer("Слишком часто.", show_alert=False)
+        return
     q2, f = _parse_filters(q)
     res = search(q2, page=page, per_page=6, filters=f)
     kb = None
