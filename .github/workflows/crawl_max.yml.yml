@@ -2,8 +2,17 @@ name: crawl-max
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        required: true
+        type: choice
+        options:
+          - quick   # только преобразование CSV -> JSON и коммит
+          - full    # полный сбор Wikipedia + конвертация и коммит
+        default: quick
   schedule:
-    - cron: '0 3 * * 6'  # weekly, Saturday 03:00 UTC
+    - cron: '0 3 * * 6'  # каждую субботу 03:00 UTC — всегда full
 
 permissions:
   contents: write
@@ -14,21 +23,20 @@ concurrency:
 
 jobs:
   build_universities:
-    name: Build universities (Wikipedia) with heartbeat
+    name: Build universities (Wikipedia) · ${{ inputs.mode || 'scheduled' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 420  # 7h hard limit to avoid auto-cancel
-
+    timeout-minutes: 420
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install deps
         run: pip install -r requirements.txt
 
-      - name: Build universities (Wikipedia) with heartbeat
+      # Полный сбор (только если schedule ИЛИ выбран режим full)
+      - name: Full crawl (Wikipedia) with heartbeat
+        if: ${{ github.event_name == 'schedule' || inputs.mode == 'full' }}
         env:
           PYTHONUNBUFFERED: "1"
         run: |
@@ -52,21 +60,29 @@ jobs:
       - name: Inspect CSV head (debug)
         run: |
           echo "--- CSV head ---"
-          head -n 15 scraper_max/out/universities.csv || true
+          head -n 12 scraper_max/out/universities.csv || true
           echo "----------------"
 
+      # Конвертация CSV -> JSON выполняется и в quick, и в full
       - name: Convert CSV -> data/universities.json
         run: |
-          python tools/convert_universities_csv_to_json.py scraper_max/out/universities.csv data/universities.json
-
-      - name: Show JSON stats
-        run: |
           python - <<'PY'
-          import json, pathlib
-          p = pathlib.Path("data/universities.json")
-          d = json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
-          print("JSON items:", len(d))
-          print("Sample:", d[:3])
+          import csv, json, os, sys, codecs
+          p = "scraper_max/out/universities.csv"
+          if not os.path.exists(p):
+            print("No CSV found at", p, "- nothing to convert")
+            sys.exit(0)
+          with open(p, "rb") as fh:
+            raw = fh.read()
+          try:
+            text = raw.decode("utf-8-sig")
+          except:
+            text = raw.decode("utf-8", "ignore")
+          rows = list(csv.DictReader(text.splitlines()))
+          os.makedirs("data", exist_ok=True)
+          with open("data/universities.json", "w", encoding="utf-8") as out:
+            json.dump(rows, out, ensure_ascii=False, indent=2)
+          print("JSON items:", len(rows))
           PY
 
       - name: Commit updated CSV+JSON
