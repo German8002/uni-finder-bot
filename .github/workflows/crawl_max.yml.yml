@@ -19,11 +19,14 @@ jobs:
     timeout-minutes: 420  # 7h hard limit to avoid auto-cancel
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install deps
         run: pip install -r requirements.txt
+
       - name: Build universities (Wikipedia) with heartbeat
         env:
           PYTHONUNBUFFERED: "1"
@@ -36,6 +39,7 @@ jobs:
             sleep 60
           done
           wait "$PID"
+
       - name: Upload universities.csv artifact (backup)
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,12 +47,57 @@ jobs:
           name: universities_csv
           path: scraper_max/out/universities.csv
           if-no-files-found: warn
-      - name: Commit updated data
+
+      # 👇 новый шаг: делаем JSON прямо в CI
+      - name: Convert CSV -> data/universities.json
+        shell: bash
+        run: |
+          python - << 'PY'
+          import csv, json, pathlib
+
+          IN  = "scraper_max/out/universities.csv"
+          OUT = "data/universities.json"
+
+          rows = []
+          with open(IN, newline="", encoding="utf-8") as f:
+              rdr = csv.DictReader(f)
+              for row in rdr:
+                  name = (row.get("name") or row.get("Название") or "").strip()
+                  city = (row.get("city") or row.get("Город") or "").strip()
+                  site = (row.get("site") or row.get("Сайт") or row.get("url") or "").strip()
+                  if not name:
+                      continue
+                  rows.append({"name": name, "city": city, "site": site, "source": "wikipedia"})
+
+          # дедуп по (name, city)
+          seen, uniq = set(), []
+          for r in rows:
+              key = (r["name"].lower(), r["city"].lower())
+              if key in seen:
+                  continue
+              seen.add(key)
+              uniq.append(r)
+
+          pathlib.Path("data").mkdir(parents=True, exist_ok=True)
+          with open(OUT, "w", encoding="utf-8") as f:
+              json.dump(uniq, f, ensure_ascii=False)
+
+          print(f"Wrote {len(uniq)} rows to {OUT}")
+          PY
+
+      - name: Commit updated CSV+JSON
+        env:
+          GIT_AUTHOR_NAME: github-actions
+          GIT_AUTHOR_EMAIL: github-actions@github.com
+          GIT_COMMITTER_NAME: github-actions
+          GIT_COMMITTER_EMAIL: github-actions@github.com
         run: |
           set -e
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git add scraper_max/out/universities.csv || true
-          git diff --staged --quiet && echo "No changes to commit" || git commit -m "data: update universities.csv [skip ci]"
-          git pull --rebase --autostash
-          git push
+          git add scraper_max/out/universities.csv data/universities.json || true
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore(data): update universities (csv+json) [skip ci]"
+            git pull --rebase --autostash
+            git push
+          fi
