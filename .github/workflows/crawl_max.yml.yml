@@ -1,12 +1,13 @@
+
 name: crawl-max
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Run mode: full (crawl) or quick (just convert+commit if CSV exists)"
+        description: "Run mode: full (crawl) or quick (convert only)"
         required: false
-        default: "full"
+        default: "quick"
   schedule:
     - cron: '0 3 * * 6'  # weekly, Saturday 03:00 UTC
 
@@ -21,19 +22,22 @@ jobs:
   build_universities:
     name: Build universities (Wikipedia) with heartbeat
     runs-on: ubuntu-latest
-    timeout-minutes: 420  # 7h hard limit
+    timeout-minutes: 420  # 7h hard limit to avoid auto-cancel
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: |
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          # pandas only if available elsewhere; we don't require it for convert
 
-      - name: Build universities (Wikipedia) with heartbeat
+      - name: Crawl (full) with heartbeat
         if: ${{ github.event.inputs.mode != 'quick' }}
         env:
           PYTHONUNBUFFERED: "1"
@@ -47,15 +51,6 @@ jobs:
           done
           wait "$PID"
 
-      - name: Ensure CSV exists (quick mode ok)
-        run: |
-          if [ ! -f scraper_max/out/universities.csv ]; then
-            echo "ERROR: scraper_max/out/universities.csv not found."
-            echo "If you ran in 'quick' mode, make sure the CSV already exists in the repo (or rerun in 'full')."
-            exit 1
-          fi
-          wc -l scraper_max/out/universities.csv || true
-
       - name: Upload universities.csv artifact (backup)
         if: always()
         uses: actions/upload-artifact@v4
@@ -67,73 +62,110 @@ jobs:
       - name: Inspect CSV head (debug)
         run: |
           echo "--- CSV head ---"
-          head -n 5 scraper_max/out/universities.csv || true
+          head -n 10 scraper_max/out/universities.csv || true
           echo "----------------"
 
       - name: Convert CSV -> data/universities.json
+        shell: bash
         run: |
-          python - << 'PY'
-          import csv, json, pathlib
+          set -e
+          PY=$(cat <<'PYCODE'
+          import csv, json, os, sys, re
+          from pathlib import Path
 
-          IN  = "scraper_max/out/universities.csv"
-          OUT = "data/universities.json"
+          csv_path = Path("scraper_max/out/universities.csv")
+          out_path = Path("data/universities.json")
+          out_path.parent.mkdir(parents=True, exist_ok=True)
 
-          rows = []
-          headers = []
+          if not csv_path.exists():
+            print(f"No CSV found at {csv_path}, skipping JSON write")
+            sys.exit(0)
 
-          def pick(d, *keys):
-              for k in keys:
-                  v = d.get(k)
-                  if v:
-                      return v
-              return ""
+          # Robust reader (handles BOM, autodetects delimiter, tolerates missing fields)
+          encodings = ["utf-8-sig", "utf-8", "cp1251"]
+          for enc in encodings:
+            try:
+              with open(csv_path, "r", encoding=enc, newline="") as f:
+                sample = f.read(4096)
+                f.seek(0)
+                # Try to sniff delimiter; default to comma
+                try:
+                  sniffer = csv.Sniffer()
+                  dialect = sniffer.sniff(sample, delimiters=[",",";","\t","|"])
+                except csv.Error:
+                  class _D: delimiter = ","
+                  dialect = _D()
+                reader = csv.DictReader(f, delimiter=getattr(dialect, "delimiter", ","))
+                headers = [h.strip().lower() for h in (reader.fieldnames or [])]
+                print("Headers:", headers)
+                # normalize header mapping
+                def pick(row, keys):
+                  for k in keys:
+                    if k in row and row[k]:
+                      return row[k]
+                  return ""
 
-          try:
-              with open(IN, encoding="utf-8", newline="") as f:
-                  sample = f.read(8192)
-                  f.seek(0)
+                items = []
+                seen = set()
+                for row in reader:
+                  # normalize keys to lowercase
+                  row = { (k or "").strip().lower(): (v or "").strip() for k, v in row.items() }
+                  title = pick(row, ["title","name","label","университет","вуз"])
+                  pageid = pick(row, ["pageid","id","wiki_id"])
+                  homepage = pick(row, ["homepage","url","site","website","сайт"])
+
+                  if not title and not pageid:
+                    # empty row
+                    continue
+
+                  # clean homepage (allow empty)
+                  if homepage and not re.match(r"^https?://", homepage, re.I):
+                    # sometimes wikipedia list contains //domain.tld
+                    if homepage.startswith("//"):
+                      homepage = "https:" + homepage
+                    else:
+                      # if it looks like domain.tld add http
+                      if re.match(r"^[\w.-]+\.[a-z]{2,}$", homepage, re.I):
+                        homepage = "http://" + homepage
+                      else:
+                        # keep as-is or blank if clearly garbage
+                        pass
+
+                  # coerce pageid to int when possible
                   try:
-                      dialect = csv.Sniffer().sniff(sample, delimiters=",;\\t|")
-                  except csv.Error:
-                      dialect = csv.get_dialect("excel")
-                  reader = csv.DictReader(f, dialect=dialect)
-                  headers = [h.strip().lower() for h in (reader.fieldnames or [])]
+                    pageid_int = int(float(pageid)) if pageid else None
+                  except Exception:
+                    pageid_int = None
 
-                  for r in reader:
-                      d = { (k or "").strip().lower(): (v or "").strip() for k,v in r.items() }
+                  key = (title.lower(), pageid_int)
+                  if key in seen:
+                    continue
+                  seen.add(key)
 
-                      name = pick(d, "name","название","университет","вуз")
-                      city = pick(d, "city","город","населенный пункт","населённый пункт","место")
-                      site = pick(d, "site","сайт","url","веб-сайт","вебсайт")
+                  items.append({
+                    "title": title,
+                    "homepage": homepage or None,
+                    "pageid": pageid_int,
+                  })
 
-                      if name:
-                          rows.append({
-                              "name": name,
-                              "city": city,
-                              "site": site,
-                              "source": "wikipedia"
-                          })
-          except FileNotFoundError:
-              print(f"WARNING: {IN} not found")
+                print(f"Parsed rows: {len(items)}")
+                if not items:
+                  print("No rows parsed — JSON not updated")
+                  sys.exit(0)
 
-          print(f"Headers: {headers}")
-          print(f"Parsed rows: {len(rows)}")
+                with open(out_path, "w", encoding="utf-8") as out:
+                  json.dump(items, out, ensure_ascii=False, indent=2)
+                print(f"Wrote JSON -> {out_path}")
 
-          seen, uniq = set(), []
-          for r in rows:
-              k = (r["name"].lower(), (r["city"] or "").lower())
-              if k in seen:
-                  continue
-              seen.add(k)
-              uniq.append(r)
-
-          pathlib.Path("data").mkdir(parents=True, exist_ok=True)
-          if uniq:
-              with open(OUT, "w", encoding="utf-8") as f:
-                  json.dump(uniq, f, ensure_ascii=False, indent=2)
-              print(f"Wrote {len(uniq)} rows to {OUT}")
+                break
+            except Exception as e:
+              last_err = e
           else:
-              print("No rows parsed — JSON not updated")
+            print(f"Failed to read CSV with tried encodings; last error: {last_err!r}")
+            sys.exit(0)
+          PYCODE
+          )
+          python - <<'PY' "$PY"
           PY
 
       - name: Commit updated CSV+JSON
@@ -142,6 +174,6 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
           git add scraper_max/out/universities.csv data/universities.json || true
-          git diff --staged --quiet && echo "No changes to commit" || git commit -m "data: update universities [skip ci]"
+          git diff --staged --quiet && echo "No changes to commit" || git commit -m "data: update universities.json (+csv) [skip ci]"
           git pull --rebase --autostash
           git push
