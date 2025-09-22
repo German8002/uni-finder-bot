@@ -2,8 +2,15 @@ name: crawl-max
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'quick'
+        type: choice
+        options: [full, quick]
   schedule:
-    - cron: '0 3 * * 6'  # weekly, Saturday 03:00 UTC
+    - cron: '0 3 * * 6'  # weekly
 
 permissions:
   contents: write
@@ -14,20 +21,18 @@ concurrency:
 
 jobs:
   build_universities:
-    name: Build universities (Wikipedia) with heartbeat
     runs-on: ubuntu-latest
-    timeout-minutes: 420  # 7h hard limit to avoid auto-cancel
+    timeout-minutes: 420
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
+        with: { python-version: '3.11' }
       - name: Install deps
         run: pip install -r requirements.txt
 
+      # ⬇️ Полный краул запускается ТОЛЬКО когда mode == full
       - name: Build universities (Wikipedia) with heartbeat
+        if: ${{ inputs.mode == 'full' || github.event_name == 'schedule' }}
         env:
           PYTHONUNBUFFERED: "1"
         run: |
@@ -48,51 +53,43 @@ jobs:
           path: scraper_max/out/universities.csv
           if-no-files-found: warn
 
-      # 👇 новый шаг: делаем JSON прямо в CI
+      # Конвертация CSV -> JSON работает и для full, и для quick
       - name: Convert CSV -> data/universities.json
-        shell: bash
         run: |
           python - << 'PY'
           import csv, json, pathlib
-
-          IN  = "scraper_max/out/universities.csv"
-          OUT = "data/universities.json"
-
-          rows = []
-          with open(IN, newline="", encoding="utf-8") as f:
-              rdr = csv.DictReader(f)
-              for row in rdr:
-                  name = (row.get("name") or row.get("Название") or "").strip()
-                  city = (row.get("city") or row.get("Город") or "").strip()
-                  site = (row.get("site") or row.get("Сайт") or row.get("url") or "").strip()
-                  if not name:
-                      continue
-                  rows.append({"name": name, "city": city, "site": site, "source": "wikipedia"})
-
-          # дедуп по (name, city)
-          seen, uniq = set(), []
+          IN, OUT = "scraper_max/out/universities.csv", "data/universities.json"
+          rows=[]
+          try:
+            with open(IN, newline="", encoding="utf-8") as f:
+              for r in csv.DictReader(f):
+                name=(r.get("name") or r.get("Название") or "").strip()
+                city=(r.get("city") or r.get("Город") or "").strip()
+                site=(r.get("site") or r.get("Сайт") or r.get("url") or "").strip()
+                if name: rows.append({"name":name,"city":city,"site":site,"source":"wikipedia"})
+          except FileNotFoundError:
+            print(f"WARNING: {IN} not found; leaving JSON unchanged if exists.")
+            rows=[]
+          # dedup
+          seen=set(); uniq=[]
           for r in rows:
-              key = (r["name"].lower(), r["city"].lower())
-              if key in seen:
-                  continue
-              seen.add(key)
-              uniq.append(r)
-
+            k=(r["name"].lower(), r["city"].lower())
+            if k in seen: continue
+            seen.add(k); uniq.append(r)
           pathlib.Path("data").mkdir(parents=True, exist_ok=True)
-          with open(OUT, "w", encoding="utf-8") as f:
-              json.dump(uniq, f, ensure_ascii=False)
-
-          print(f"Wrote {len(uniq)} rows to {OUT}")
+          if rows:
+            with open(OUT,"w",encoding="utf-8") as f: json.dump(uniq,f,ensure_ascii=False)
+            print(f"Wrote {len(uniq)} rows to {OUT}")
+          else:
+            # если quick-режим и CSV нет, просто не трогаем JSON
+            print("No CSV — skipping JSON write")
           PY
 
       - name: Commit updated CSV+JSON
-        env:
-          GIT_AUTHOR_NAME: github-actions
-          GIT_AUTHOR_EMAIL: github-actions@github.com
-          GIT_COMMITTER_NAME: github-actions
-          GIT_COMMITTER_EMAIL: github-actions@github.com
         run: |
           set -e
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
           git add scraper_max/out/universities.csv data/universities.json || true
           if git diff --staged --quiet; then
             echo "No changes to commit"
