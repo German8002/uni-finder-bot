@@ -2,11 +2,6 @@ name: crawl-max
 
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "Run mode: quick (convert only) or full (crawl + convert)"
-        required: false
-        default: "quick"
   schedule:
     - cron: '0 3 * * 6'  # weekly, Saturday 03:00 UTC
 
@@ -22,6 +17,7 @@ jobs:
     name: Build universities (Wikipedia) with heartbeat
     runs-on: ubuntu-latest
     timeout-minutes: 420  # 7h hard limit to avoid auto-cancel
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,11 +26,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install deps
-        if: ${{ github.event.inputs.mode != 'quick' }}
         run: pip install -r requirements.txt
 
       - name: Build universities (Wikipedia) with heartbeat
-        if: ${{ github.event.inputs.mode != 'quick' }}
         env:
           PYTHONUNBUFFERED: "1"
         run: |
@@ -58,108 +52,21 @@ jobs:
       - name: Inspect CSV head (debug)
         run: |
           echo "--- CSV head ---"
-          head -n 12 scraper_max/out/universities.csv || true
+          head -n 15 scraper_max/out/universities.csv || true
+          echo "----------------"
 
       - name: Convert CSV -> data/universities.json
         run: |
-          set -e
-          python - <<'PY'
-          import csv, json, os, re, sys, io
-
-          csv_path = "scraper_max/out/universities.csv"
-          out_dir = "data"
-          out_path = os.path.join(out_dir, "universities.json")
-          os.makedirs(out_dir, exist_ok=True)
-
-          if not os.path.exists(csv_path):
-              print(f"NO_CSV: {csv_path} not found")
-              sys.exit(0)
-
-          raw = open(csv_path, "rb").read()
-
-          # Try a few common encodings (CSV from wiki can be tricky)
-          text = None
-          for enc in ("utf-8-sig", "utf-8", "cp1251"):
-              try:
-                  text = raw.decode(enc)
-                  print(f"Decoded CSV with encoding: {enc}")
-                  break
-              except Exception:
-                  pass
-          if text is None:
-              text = raw.decode("utf-8", "ignore")
-              print("Decoded CSV with encoding: utf-8 (errors ignored)")
-
-          # Detect delimiter safely
-          sample = "\n".join(text.splitlines()[:50])
-          try:
-              dialect = csv.Sniffer().sniff(sample)
-              delim = getattr(dialect, "delimiter", ",")
-          except Exception:
-              dialect = csv.excel
-              delim = ","
-          print(f"Detected delimiter: {delim!r}")
-
-          reader = csv.DictReader(io.StringIO(text), dialect=dialect)
-
-          def norm_homepage(v: str|None) -> str|None:
-              if not v:
-                  return None
-              v = v.strip()
-              if not v:
-                  return None
-              if v.startswith("//"):
-                  v = "https:" + v
-              return v
-
-          def norm_pageid(v) -> int|None:
-              if v is None or v == "":
-                  return None
-              s = re.sub(r"\\D+", "", str(v))
-              if not s:
-                  return None
-              try:
-                  return int(s)
-              except Exception:
-                  return None
-
-          items = []
-          for i, row in enumerate(reader, 1):
-              # allow flexible headers
-              title = row.get("title") or row.get("Title") or row.get("name") or row.get("Name")
-              homepage = row.get("homepage") or row.get("site") or row.get("url")
-              pageid = row.get("pageid") or row.get("page_id") or row.get("PageID")
-
-              title = (title or "").strip()
-              homepage = norm_homepage(homepage)
-              pageid = norm_pageid(pageid)
-
-              if not title and pageid is None and homepage is None:
-                  # completely empty logical row -> skip
-                  continue
-
-              items.append({
-                  "title": title or None,
-                  "homepage": homepage,
-                  "pageid": pageid,
-              })
-
-          with open(out_path, "w", encoding="utf-8") as f:
-              json.dump(items, f, ensure_ascii=False, indent=2)
-
-          print(f"Wrote {len(items)} items -> {out_path}")
-          PY
+          python tools/convert_universities_csv_to_json.py scraper_max/out/universities.csv data/universities.json
 
       - name: Show JSON stats
         run: |
           python - <<'PY'
-          import json, os
-          p = "data/universities.json"
-          if os.path.exists(p):
-              d = json.load(open(p, encoding="utf-8"))
-              print("JSON items:", len(d))
-          else:
-              print("JSON not found")
+          import json, pathlib
+          p = pathlib.Path("data/universities.json")
+          d = json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
+          print("JSON items:", len(d))
+          print("Sample:", d[:3])
           PY
 
       - name: Commit updated CSV+JSON
@@ -167,11 +74,7 @@ jobs:
           set -e
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "data: update universities.csv + data/universities.json [skip ci]"
-            git pull --rebase --autostash
-            git push
-          fi
+          git add scraper_max/out/universities.csv data/universities.json || true
+          git diff --staged --quiet && echo "No changes to commit" || git commit -m "data: update universities.csv + data/universities.json [skip ci]"
+          git pull --rebase --autostash
+          git push
