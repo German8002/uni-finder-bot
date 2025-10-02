@@ -1,0 +1,81 @@
+name: Build programs database
+
+on:
+  workflow_dispatch:
+    inputs:
+      refresh_cache:
+        description: "Ignore HTTP cache for scrapers"
+        type: boolean
+        default: false
+      only_source:
+        description: "Run single source adapter (scripts/sources/<name>.py)"
+        type: string
+        default: ""
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Build dataset
+        env:
+          SCRAPER_REFRESH_CACHE: ${{ inputs.refresh_cache }}
+          ONLY_SOURCE: ${{ inputs.only_source }}
+        run: |
+          python scripts/build_dataset.py
+
+      - name: Validate dataset
+        run: |
+          python scripts/validate_dataset.py
+
+      - name: Normalize JSON
+        run: |
+          for f in public/data/*.json; do
+            tmp="${f}.tmp"
+            jq -S . "$f" > "$tmp" && mv "$tmp" "$f"
+          done
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(data): update programs & universities dataset [CI]"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
+          file_pattern: public/data/*.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: datasets
+          path: public/data/*.json
+          if-no-files-found: warn
