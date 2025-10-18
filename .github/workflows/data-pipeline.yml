@@ -1,5 +1,4 @@
-
-name: Data pipeline (single workflow)
+name: Data pipeline (ALL universities + Ratings)
 
 on:
   workflow_dispatch: {}
@@ -28,7 +27,7 @@ jobs:
         run: |
           echo "Heartbeat started..."
           while true; do
-            echo "✅ Job is alive at $(date -u +"%H:%M:%S")"
+            echo "✅ Job is alive at $(date -u +\"%H:%M:%S\")"
             sleep 300
           done &
 
@@ -37,7 +36,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build dataset (ALL universities + Rankings)
+      - name: Build dataset (ALL universities + Ratings)
         env:
           PYTHONPATH: .
           ALL_UNI_CSV_URL: ${{ secrets.ALL_UNI_CSV_URL }}
