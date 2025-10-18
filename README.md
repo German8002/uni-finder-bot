@@ -1,33 +1,16 @@
-# Uni Finder Bot — full (with EGE)
+# Uni Finder Bot — Rankings (RAEX + Interfax), no EGE
+- Тянем **рейтинги вузов** (RAEX-100 2024, Interfax NRU 2024/2025) и строим **difficulty_index** от 0 до 100 (чем выше, тем «сложнее» попасть).
+- Бот: поиск /find, список лидеров /topdifficulty, автообновление каждые 5 минут, /refresh (админ).
+- ЕГЭ отсутствует (убрано по требованию).
 
-Телеграм-бот (FastAPI + aiogram v3) для поиска вузов и направлений.
-Поддерживает поле **ЕГЭ (проходной балл)** и фильтр `/ege_min <число>`.
+## Поля в `latest.json`
+- `university`, `city` (если удалось извлечь), `rating_source` (`RAEX` | `Interfax NRU`), `rating_year`, `rating_position`, `difficulty_index` (0–100).
 
-## Источники данных
-- GitHub raw (`GITHUB_DATA_REPO`, `GITHUB_DATA_PATH`, `GITHUB_DATA_BRANCH`)
-- Локальный JSON (`DATA_JSON_PATH`, по умолчанию `public/data/sample.json`)
-- Публичный CSV (`DATA_CSV_URL`)
+## Как это работает
+- `scraper_latest/providers/raex.py` — парсит публичную страницу RAEX-100 (2024).
+- `scraper_latest/providers/interfax.py` — базовый парсер страницы рейтинга Интерфакса (может требовать корректировок, если изменится верстка).
+- `scraper_latest/build_dataset.py` — объединяет источники, удаляет дубли, считает `difficulty_index` как обратный перцентиль позиции в рейтинге.
 
-## Render
-- Build: `pip install -r requirements.txt`
-- Start: `python main.py`
-- ENV: `TELEGRAM_TOKEN`, `PUBLIC_BASE_URL`, `WEBHOOK_SECRET` (опц),
-  `GITHUB_DATA_REPO`, `GITHUB_DATA_PATH`, `GITHUB_DATA_BRANCH`,
-  `DATA_JSON_PATH`, `DATA_CSV_URL`, `DATA_REFRESH_TTL_SECONDS`, `SEARCH_CACHE_TTL_SECONDS`.
-
-## Команды
-- `/start` — помощь
-- `/find <запрос>` — поиск
-- `/ege_min <число>` — фильтр по проходному баллу ЕГЭ
-
-## Автосборка базы (GitHub Actions)
-Workflow `.github/workflows/update-data.yml` собирает и коммитит:
-- `public/data/latest.json`
-- `public/data/latest.csv`
-
-Схема нормализации: `university`, `program`, `city`, `code`, `ege`, `source`.
-
-## Логи и частота обновления
-- Логи пишутся в stdout (Render их показывает). Примеры: `Data loaded: N rows`, `Bot is ready`, `Refreshing data due to TTL...`, `GitHub dataset not modified (304)`.
-- Настрой `LOG_LEVEL` (`debug`/`info`/`warn`/`error`), по умолчанию `info`.
-- Обновление базы на проде контролируется `DATA_REFRESH_TTL_SECONDS`. Если GitHub Actions обновляет раз в день — ставь 1800–3600, если чаще — 300–900.
+## Ограничения
+- Оба источника — **публичные страницы**. Разметка может меняться; если парсер не находит таблицу, поправь селекторы.
+- Интерфакс использует интерактивную разметку, поэтому селектор может потребовать уточнения.

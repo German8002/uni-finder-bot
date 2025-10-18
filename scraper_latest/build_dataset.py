@@ -1,118 +1,62 @@
 #!/usr/bin/env python3
-"""
-Собирает базу из внешних источников и пишет в:
-  - public/data/latest.csv
-  - public/data/latest.json
-
-Выходные поля:
-  university, program, city, code, ege, source
-"""
-
-import os, sys, json, io
+import os, json
 from typing import List, Dict, Any
-import requests
 import pandas as pd
+
+from scraper_latest.providers.raex import parse as raex_parse
+from scraper_latest.providers.interfax import parse as interfax_parse
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OUT_DIR = os.path.join(ROOT, "public", "data")
 os.makedirs(OUT_DIR, exist_ok=True)
 
-def fetch_text(url: str, timeout: float = 60.0) -> str:
-    r = requests.get(url, timeout=timeout)
-    r.raise_for_status()
-    return r.text
-
-def fetch_json(url: str, timeout: float = 60.0) -> Any:
-    r = requests.get(url, timeout=timeout)
-    r.raise_for_status()
-    return r.json()
-
-def parse_ege(val) -> str:
-    if val is None:
-        return ""
-    try:
-        s = str(val).strip().replace(",", ".")
-        import re
-        m = re.findall(r"\d+(?:\.\d+)?", s)
-        if not m:
-            return ""
-        v = float(m[0])
-        return str(int(v))
-    except Exception:
-        return ""
-
-def normalize_records(records: List[Dict[str, Any]], source: str) -> List[Dict[str, Any]]:
-    out = []
-    for r in records:
-        uni = r.get("university") or r.get("ВУЗ") or r.get("Университет") or r.get("uni")
-        prog = r.get("program") or r.get("Направление") or r.get("direction") or r.get("Специальность")
-        city = r.get("city") or r.get("Город") or r.get("region")
-        code = r.get("code") or r.get("Код")
-        ege_raw = None
-        for k in ("ege","ЕГЭ","Баллы","Проходной балл","Минимальный балл","Проходные баллы","Егэ","passing_score","score"):
-            if k in r and str(r[k]).strip() != "":
-                ege_raw = r[k]
-                break
-        ege = parse_ege(ege_raw)
-        out.append({
-            "university": (str(uni) if uni is not None else "").strip(),
-            "program": (str(prog) if prog is not None else "").strip(),
-            "city": (str(city) if city is not None else "").strip(),
-            "code": (str(code) if code is not None else "").strip(),
-            "ege": ege,
-            "source": source
-        })
-    return out
+def compute_difficulty_index(df: pd.DataFrame) -> pd.DataFrame:
+    # Простая эвристика: difficulty = 100 - percentile(rank)
+    if "rating_position" not in df or df["rating_position"].isna().all():
+        df["difficulty_index"] = 0
+        return df
+    # Группируем по источнику/году, считаем перцентиль по позиции
+    def per_group(g: pd.DataFrame) -> pd.DataFrame:
+        g = g.copy()
+        g["rank_percentile"] = (g["rating_position"].rank(method="min") - 1) / max(len(g)-1, 1)
+        g["difficulty_index"] = (1 - g["rank_percentile"]) * 100
+        g["difficulty_index"] = g["difficulty_index"].round(0).astype(int)
+        return g
+    return df.groupby(["rating_source","rating_year"], group_keys=False).apply(per_group)
 
 def main():
-    csv_urls = []
-    json_urls = []
+    all_rows: List[Dict[str,Any]] = []
 
-    rows: List[Dict[str,Any]] = []
+    # RAEX top-100 (2024)
+    try:
+        all_rows.extend(raex_parse())
+    except Exception as e:
+        print(f"[WARN] RAEX parse failed: {e}")
 
-    for url in csv_urls:
+    # Interfax NRU (2024, возможно 2025 на той же странице)
+    for y in (2025, 2024):
         try:
-            text = fetch_text(url)
-            df = pd.read_csv(io.StringIO(text))
-            recs = df.to_dict(orient="records")
-            rows.extend(normalize_records(recs, url))
+            rows = interfax_parse(year=y)
+            # пометим год явно
+            for r in rows: r["rating_year"] = y
+            all_rows.extend(rows)
         except Exception as e:
-            print(f"[WARN] CSV fetch failed {url}: {e}", file=sys.stderr)
+            print(f"[WARN] Interfax parse failed ({y}): {e}")
 
-    for url in json_urls:
-        try:
-            data = fetch_json(url)
-            if isinstance(data, dict) and "items" in data:
-                data = data["items"]
-            if isinstance(data, dict):
-                data = [data]
-            if not isinstance(data, list):
-                raise ValueError("Unexpected JSON structure")
-            rows.extend(normalize_records(data, url))
-        except Exception as e:
-            print(f"[WARN] JSON fetch failed {url}: {e}", file=sys.stderr)
-
-    if not rows:
+    # fallback на sample
+    if not all_rows:
         sample = os.path.join(ROOT, "public", "data", "sample.json")
         if os.path.exists(sample):
-            with open(sample, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            rows = normalize_records(data, "local-sample")
-        else:
-            rows = []
+            all_rows = json.load(open(sample,encoding="utf-8"))
 
-    if rows:
-        df = pd.DataFrame(rows).drop_duplicates(subset=["university", "program", "city", "code", "ege"])
-    else:
-        df = pd.DataFrame(columns=["university","program","city","code","ege","source"])
+    df = pd.DataFrame(all_rows)
+    # Уникальность по (источник, год, вуз)
+    if not df.empty:
+        df = df.drop_duplicates(subset=["rating_source","rating_year","university"])
+        df = compute_difficulty_index(df)
 
-    out_csv = os.path.join(OUT_DIR, "latest.csv")
-    df.to_csv(out_csv, index=False)
-
-    out_json = os.path.join(OUT_DIR, "latest.json")
-    with open(out_json, "w", encoding="utf-8") as f:
-        json.dump(df.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
-
+    out_csv  = os.path.join(OUT_DIR, "latest.csv");  df.to_csv(out_csv, index=False)
+    out_json = os.path.join(OUT_DIR, "latest.json"); json.dump(df.to_dict(orient="records"), open(out_json,"w",encoding="utf-8"), ensure_ascii=False, indent=2)
     print(f"[OK] Wrote {out_csv} and {out_json} with {len(df)} rows.")
 
 if __name__ == "__main__":

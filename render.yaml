@@ -11,19 +11,15 @@ services:
         sync: false
       - key: PUBLIC_BASE_URL
         sync: false
-      - key: DATA_JSON_PATH
-        sync: false
-      - key: DATA_CSV_URL
-        sync: false
-      - key: DATA_REFRESH_TTL_SECONDS
-        sync: false
-      - key: SEARCH_CACHE_TTL_SECONDS
-        sync: false
       - key: GITHUB_DATA_REPO
         sync: false
       - key: GITHUB_DATA_PATH
         sync: false
       - key: GITHUB_DATA_BRANCH
         sync: false
-      - key: WEBHOOK_SECRET
+      - key: DATA_REFRESH_TTL_SECONDS
+        sync: false
+      - key: LOG_LEVEL
+        sync: false
+      - key: ADMIN_USER_ID
         sync: false
