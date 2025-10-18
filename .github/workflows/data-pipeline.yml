@@ -1,3 +1,4 @@
+
 name: Data pipeline (single workflow)
 
 on:
@@ -36,10 +37,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Build dataset (rankings RAEX + Interfax)
-        working-directory: .
+      - name: Build dataset (ALL universities + Rankings)
         env:
           PYTHONPATH: .
+          ALL_UNI_CSV_URL: ${{ secrets.ALL_UNI_CSV_URL }}
         run: |
           python -m scraper_latest.build_dataset
 
