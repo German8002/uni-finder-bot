@@ -42,6 +42,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Build dataset (rankings RAEX + Interfax)
+        working-directory: .
         run: |
           python scraper_latest/build_dataset.py
 
