@@ -1,8 +1,8 @@
-import time, re, requests
+import time, requests
 from typing import List, Dict, Any
 from bs4 import BeautifulSoup
 
-INTERFAX_URL = "https://www.interfax-russia.ru/academia/ratings"  # таблица с фильтрами
+INTERFAX_URL = "https://www.interfax-russia.ru/academia/ratings"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; UniFinderBot/1.0)"}
 
 def fetch(url: str, delay: float=1.0, timeout: float=30.0) -> str:
@@ -12,14 +12,7 @@ def parse(year: int=2024) -> List[Dict[str,Any]]:
     html = fetch(INTERFAX_URL)
     soup = BeautifulSoup(html, "lxml")
     rows: List[Dict[str,Any]] = []
-    # Ищем элементы с позициями и названием вуза (страница активно скриптовая; парсинг может потребовать корректировок)
-    for i, item in enumerate(soup.select("li, tr, .rating-row, .row"), 1):
-        txt = item.get_text(" ", strip=True)
-        # эвристика: встречается "Национальный рейтинг университетов за 2025/2024"
-        # тут просто соберем имена вузов из ссылок
-        a = item.find("a")
-        if not a: 
-            continue
+    for i, a in enumerate(soup.select("a"), 1):
         name = a.get_text(strip=True)
         if len(name) < 4: 
             continue

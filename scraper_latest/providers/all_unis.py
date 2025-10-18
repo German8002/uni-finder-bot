@@ -1,16 +1,15 @@
-
 from typing import List, Dict, Any
-import io, json, requests
+import io, requests
 import pandas as pd
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; UniFinderBot/1.0)"}
 
-def load_from_url(url: str) -> List[Dict[str, Any]]:
+def load_from_url(url: str) -> list[dict]:
     r = requests.get(url, headers=HEADERS, timeout=60)
     r.raise_for_status()
     ct = r.headers.get("content-type","").lower()
     text = r.text
-    # Try JSON first
+    # JSON?
     try:
         if "json" in ct or text.strip().startswith(("{","[")):
             obj = r.json()
@@ -20,16 +19,14 @@ def load_from_url(url: str) -> List[Dict[str, Any]]:
                 return obj
     except Exception:
         pass
-    # Fallback: CSV via pandas
+    # CSV
     try:
         df = pd.read_csv(io.StringIO(text))
     except Exception:
-        # some csv are semicolon; try separator auto
         df = pd.read_csv(io.StringIO(text), sep=None, engine="python")
     return df.to_dict(orient="records")
 
 def normalize_row(row: Dict[str, Any]) -> Dict[str, Any]:
-    # Try to find common column names
     name = row.get("university") or row.get("name") or row.get("full_name") or row.get("short_name") or row.get("org_name")
     city = row.get("city") or row.get("address_city") or row.get("region") or row.get("location")
     return {
