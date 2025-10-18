@@ -1,0 +1,70 @@
+
+name: Full data build (edu.ru + Wikipedia)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 3 * * *"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Run full scraping pipeline (edu.ru + Wikipedia)
+        run: |
+          echo "Starting full scrape pipeline..."
+          (while true; do echo "💓 Heartbeat — workflow still alive at $(date)"; sleep 300; done) &
+          HEARTBEAT_PID=$!
+
+          python tools/scrape_edu_ru.py
+          python scraper_max/scripts/build_universities.py
+          python scraper_latest/scripts/crawl_official_latest.py
+          python scraper_latest/scripts/normalize_latest.py
+          python scripts/validate_dataset.py || true
+
+          kill $HEARTBEAT_PID || true
+          echo "✅ Data scraping and normalization complete."
+
+      - name: Normalize JSON for consistency
+        run: |
+          for f in public/data/*.json; do
+            tmp="${f}.tmp"
+            jq -S . "$f" > "$tmp" && mv "$tmp" "$f"
+          done
+
+      - name: Commit and push updates
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(data): update universities and programs dataset [edu.ru + Wikipedia]"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
+          file_pattern: public/data/*.json
