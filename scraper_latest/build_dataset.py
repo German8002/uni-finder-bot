@@ -19,11 +19,8 @@ def norm_name(s: str) -> str:
     if not s:
         return ""
     s = str(s)
-    # collapse whitespace
     s = re.sub(r"\s+", " ", s, flags=re.M).strip().lower()
-    # remove quotes
     s = s.replace("«", "").replace("»", "").replace('\"', "").replace("\'", "").replace('"', "").replace("'", "")
-    # common normalizations
     replacements = {
         "федеральное государственное бюджетное образовательное учреждение высшего образования ": "",
         "национальный исследовательский ": "",
@@ -57,28 +54,21 @@ def compute_difficulty_index(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    # 1) Base list of ALL universities
-    url = os.getenv("ALL_UNI_CSV_URL", "")
-    base_rows: List[Dict[str, Any]] = []
-    if url:
-        try:
-            base_rows = fetch_all_unis(url)
-        except Exception as e:
-            print(f"[WARN] fetch_all_unis failed: {e}")
-    if not base_rows:
-        # fallback to sample
-        sample = os.path.join(ROOT, "public", "data", "sample.json")
-        if os.path.exists(sample):
-            with open(sample, encoding="utf-8") as f:
-                base_rows = json.load(f)
+    # 1) Base list: ALL universities (REQUIRED)
+    url = os.getenv("ALL_UNI_CSV_URL", "").strip()
+    if not url:
+        raise RuntimeError("ALL_UNI_CSV_URL is not set. Provide a direct CSV/JSON URL with ALL universities.")
+
+    base_rows: List[Dict[str, Any]] = fetch_all_unis(url)
+    if len(base_rows) < 500:
+        raise RuntimeError(f"Base list is too small: {len(base_rows)} rows (<500). Check ALL_UNI_CSV_URL.")
 
     base = pd.DataFrame(base_rows)
-    if not base.empty:
-        base["norm_name"] = base["university"].map(norm_name)
-    else:
-        base["norm_name"] = []
+    base["university"] = base["university"].fillna("").astype(str)
+    base["city"] = base.get("city", pd.Series([""]*len(base))).fillna("").astype(str)
+    base["norm_name"] = base["university"].map(norm_name)
 
-    # 2) Ratings
+    # 2) Ratings: RAEX + Interfax (optional; where available)
     rating_rows: List[Dict[str, Any]] = []
     try:
         rating_rows.extend(raex_parse())
@@ -99,8 +89,8 @@ def main():
         ratings["norm_name"] = ratings["university"].map(norm_name)
         ratings = compute_difficulty_index(ratings)
 
-    # 3) Left join: all universities + ratings (where available)
-    if not base.empty and not ratings.empty:
+    # 3) Left join: ALL universities + ratings (only where found)
+    if not ratings.empty:
         merged = base.merge(
             ratings[["norm_name", "rating_source", "rating_year", "rating_position", "difficulty_index"]],
             on="norm_name",
