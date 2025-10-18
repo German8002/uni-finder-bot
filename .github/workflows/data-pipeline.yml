@@ -1,0 +1,58 @@
+name: Data pipeline (single workflow)
+
+on:
+  workflow_dispatch:
+    inputs:
+      schedule_run:
+        description: 'Run as scheduled (no effect, just label)'
+        required: false
+        default: 'false'
+  schedule:
+    - cron: "0 4 * * *"   # daily 04:00 UTC
+  push:
+    paths:
+      - "scraper_latest/**"
+      - ".github/workflows/data-pipeline.yml"
+
+jobs:
+  build_dataset:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Heartbeat (every 5 minutes)
+        run: |
+          echo "Heartbeat started..."
+          while true; do
+            echo "✅ Job is alive at $(date -u +"%H:%M:%S")"
+            sleep 300
+          done &
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build dataset (rankings RAEX + Interfax)
+        run: |
+          python scraper_latest/build_dataset.py
+
+      - name: Commit & push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/latest.csv public/data/latest.json || true
+          if git diff --staged --quiet; then
+            echo "No dataset changes."
+          else
+            git commit -m "data: update latest dataset [skip ci]"
+            git push
+          fi
