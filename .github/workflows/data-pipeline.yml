@@ -39,7 +39,6 @@ jobs:
       - name: Build dataset (ALL universities + Ratings)
         env:
           PYTHONPATH: .
-          ALL_UNI_CSV_URL: ${{ secrets.ALL_UNI_CSV_URL }}
         run: |
           python -m scraper_latest.build_dataset
 
@@ -53,4 +52,3 @@ jobs:
           else
             git commit -m "data: update latest dataset [skip ci]"
             git push
-          fi
