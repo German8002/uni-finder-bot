@@ -1,14 +1,9 @@
 name: Data pipeline (single workflow)
 
 on:
-  workflow_dispatch:
-    inputs:
-      schedule_run:
-        description: 'Run as scheduled (no effect, just label)'
-        required: false
-        default: 'false'
+  workflow_dispatch: {}
   schedule:
-    - cron: "0 4 * * *"   # daily 04:00 UTC
+    - cron: "0 4 * * *"
   push:
     paths:
       - "scraper_latest/**"
@@ -43,8 +38,10 @@ jobs:
 
       - name: Build dataset (rankings RAEX + Interfax)
         working-directory: .
+        env:
+          PYTHONPATH: .
         run: |
-          python scraper_latest/build_dataset.py
+          python -m scraper_latest.build_dataset
 
       - name: Commit & push changes
         run: |
