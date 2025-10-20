@@ -1,38 +1,38 @@
 [
   {
-    "university": "МГУ",
     "city": "Москва",
-    "rating_source_x": "RAEX",
-    "rating_year_x": 2024,
-    "rating_position_x": 1,
     "difficulty_index_x": 100,
-    "rating_source_y": NaN,
-    "rating_year_y": NaN,
-    "rating_position_y": NaN,
-    "difficulty_index_y": null
+    "difficulty_index_y": null,
+    "rating_position_x": 1,
+    "rating_position_y": null,
+    "rating_source_x": "RAEX",
+    "rating_source_y": null,
+    "rating_year_x": 2024,
+    "rating_year_y": null,
+    "university": "МГУ"
   },
   {
-    "university": "МГТУ им. Н.Э. Баумана",
     "city": "Москва",
-    "rating_source_x": "RAEX",
-    "rating_year_x": 2024,
-    "rating_position_x": 2,
     "difficulty_index_x": 99,
-    "rating_source_y": NaN,
-    "rating_year_y": NaN,
-    "rating_position_y": NaN,
-    "difficulty_index_y": null
+    "difficulty_index_y": null,
+    "rating_position_x": 2,
+    "rating_position_y": null,
+    "rating_source_x": "RAEX",
+    "rating_source_y": null,
+    "rating_year_x": 2024,
+    "rating_year_y": null,
+    "university": "МГТУ им. Н.Э. Баумана"
   },
   {
-    "university": "СПбГУ",
     "city": "Санкт-Петербург",
-    "rating_source_x": "RAEX",
-    "rating_year_x": 2024,
-    "rating_position_x": 5,
     "difficulty_index_x": 95,
-    "rating_source_y": NaN,
-    "rating_year_y": NaN,
-    "rating_position_y": NaN,
-    "difficulty_index_y": null
+    "difficulty_index_y": null,
+    "rating_position_x": 5,
+    "rating_position_y": null,
+    "rating_source_x": "RAEX",
+    "rating_source_y": null,
+    "rating_year_x": 2024,
+    "rating_year_y": null,
+    "university": "СПбГУ"
   }
 ]

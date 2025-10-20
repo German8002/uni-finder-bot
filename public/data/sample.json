@@ -1,26 +1,26 @@
 [
   {
-    "university": "МГУ",
     "city": "Москва",
-    "rating_source": "RAEX",
-    "rating_year": 2024,
+    "difficulty_index": 100,
     "rating_position": 1,
-    "difficulty_index": 100
+    "rating_source": "RAEX",
+    "rating_year": 2024,
+    "university": "МГУ"
   },
   {
-    "university": "МГТУ им. Н.Э. Баумана",
     "city": "Москва",
+    "difficulty_index": 99,
+    "rating_position": 2,
     "rating_source": "RAEX",
     "rating_year": 2024,
-    "rating_position": 2,
-    "difficulty_index": 99
+    "university": "МГТУ им. Н.Э. Баумана"
   },
   {
-    "university": "СПбГУ",
     "city": "Санкт-Петербург",
+    "difficulty_index": 95,
+    "rating_position": 5,
     "rating_source": "RAEX",
     "rating_year": 2024,
-    "rating_position": 5,
-    "difficulty_index": 95
+    "university": "СПбГУ"
   }
 ]
